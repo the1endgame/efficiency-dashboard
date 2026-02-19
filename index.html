@@ -352,6 +352,7 @@
 <script>
 // ── Config ────────────────────────────────────────────────────────────────
 const CLIENT_ID = '203930';
+const CLIENT_SECRET = '8d25e65d23c2bd0ebf7d0b3cd9dac4b7b7b69ada';
 const REDIRECT_URI = 'https://the1endgame.github.io/efficiency-dashboard';
 
 // ── Storage ───────────────────────────────────────────────────────────────
@@ -362,22 +363,39 @@ const LS = {
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
-  // Check if Strava redirected back with a token
-  const hash = window.location.hash;
-  if(hash.includes('access_token')){
-    const params = new URLSearchParams(hash.replace('#',''));
-    const token = params.get('access_token');
-    if(token){
-      LS.save('strava_token', token);
-      // Clean URL
-      history.replaceState(null, '', window.location.pathname);
-      startDashboard(token);
-      return;
+window.addEventListener('DOMContentLoaded', async () => {
+  // Check if Strava redirected back with ?code=
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if(code){
+    history.replaceState(null, '', window.location.pathname);
+    showLoading(true);
+    setLoadingText('Exchanging auth code…');
+    try {
+      const r = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          code,
+          grant_type: 'authorization_code'
+        })
+      });
+      const data = await r.json();
+      if(!data.access_token) throw new Error(data.message || 'Token exchange failed');
+      LS.save('strava_token', data.access_token);
+      LS.save('strava_refresh', data.refresh_token);
+      showLoading(false);
+      startDashboard(data.access_token);
+    } catch(e){
+      showLoading(false);
+      showError('Auth failed: ' + e.message);
+      showAuth();
     }
+    return;
   }
 
-  // Check for saved token
   const saved = LS.load('strava_token');
   if(saved){
     startDashboard(saved);
@@ -387,7 +405,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function authoriseStrava(){
-  const url = `https://www.strava.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=activity:read_all`;
+  const url = `https://www.strava.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&approval_prompt=auto&scope=activity:read_all`;
   window.location.href = url;
 }
 
