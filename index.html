@@ -172,6 +172,87 @@
   .stat-value.running { color: var(--running); }
   .stat-sub { font-size: 0.65rem; color: var(--muted); margin-top: 0.3rem; }
 
+  /* Controls bar */
+  .controls-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 0.85rem 1.4rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+  }
+
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+  }
+
+  .control-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .btn-group { display: flex; gap: 0.2rem; }
+
+  .ctrl-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.3rem 0.65rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .ctrl-btn:hover { border-color: var(--cycling); color: var(--cycling); }
+  .ctrl-btn.active {
+    border-color: var(--cycling);
+    color: var(--cycling);
+    background: rgba(200,240,74,0.08);
+  }
+
+  .control-divider {
+    width: 1px;
+    height: 1.6rem;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .date-inputs { display: flex; align-items: center; gap: 0.4rem; }
+  .date-sep { color: var(--muted); font-size: 0.72rem; }
+
+  input[type="date"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    padding: 0.3rem 0.55rem;
+    cursor: pointer;
+    outline: none;
+    color-scheme: dark;
+    transition: border-color 0.15s;
+  }
+
+  input[type="date"]:focus { border-color: var(--cycling); }
+
+  .control-info {
+    font-size: 0.62rem;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+
   /* Charts */
   .charts-grid {
     display: grid;
@@ -298,6 +379,50 @@
   <div id="errorMsg" class="error-msg"></div>
   <div id="loading" class="loading"><div class="spinner"></div><span id="loadingText">Fetching activities…</span></div>
 
+  <!-- Controls bar (shown after data loads) -->
+  <div id="controlsBar" class="controls-bar" style="display:none">
+    <!-- Date range -->
+    <div class="control-group">
+      <div class="control-label">Range</div>
+      <div class="btn-group">
+        <button class="ctrl-btn active" data-preset="all"  onclick="setPreset('all')">All</button>
+        <button class="ctrl-btn"        data-preset="ytd"  onclick="setPreset('ytd')">YTD</button>
+        <button class="ctrl-btn"        data-preset="2025" onclick="setPreset('2025')">2025</button>
+        <button class="ctrl-btn"        data-preset="2024" onclick="setPreset('2024')">2024</button>
+        <button class="ctrl-btn"        data-preset="6m"   onclick="setPreset('6m')">6M</button>
+        <button class="ctrl-btn"        data-preset="12m"  onclick="setPreset('12m')">12M</button>
+      </div>
+      <div class="date-inputs">
+        <input type="date" id="startDate" onchange="clearPresetBtns(); renderDashboard()">
+        <span class="date-sep">→</span>
+        <input type="date" id="endDate" onchange="clearPresetBtns(); renderDashboard()">
+      </div>
+    </div>
+
+    <div class="control-divider"></div>
+
+    <!-- Rolling average window -->
+    <div class="control-group">
+      <div class="control-label">Rolling avg</div>
+      <div class="btn-group">
+        <button class="ctrl-btn" data-days="14" onclick="setRolling(14)">2w</button>
+        <button class="ctrl-btn active" data-days="28" onclick="setRolling(28)">4w</button>
+        <button class="ctrl-btn" data-days="42" onclick="setRolling(42)">6w</button>
+        <button class="ctrl-btn" data-days="56" onclick="setRolling(56)">8w</button>
+        <button class="ctrl-btn" data-days="84" onclick="setRolling(84)">12w</button>
+      </div>
+    </div>
+
+    <div class="control-divider"></div>
+
+    <!-- Outlier filter -->
+    <div class="control-group">
+      <div class="control-label">Outliers</div>
+      <button class="ctrl-btn active" id="outlierBtn" onclick="toggleOutliers()">Filter on</button>
+      <span class="control-info" id="outlierInfo"></span>
+    </div>
+  </div>
+
   <div id="dashboard" style="display:none">
     <div class="stats-row">
       <div class="stat-card cycling">
@@ -341,7 +466,7 @@
 
     <div class="trend-card">
       <div class="chart-header">
-        <div class="chart-title">Rolling 4-Week Trend <span class="unit">% change from baseline</span></div>
+        <div class="chart-title" id="trendTitle">Rolling 4W Trend <span class="unit">% change from baseline</span></div>
       </div>
       <div class="chart-container" style="height:200px"><canvas id="trendChart"></canvas></div>
     </div>
@@ -362,9 +487,16 @@ const LS = {
   remove(k){ try{ localStorage.removeItem(k); }catch(e){} }
 };
 
+// ── Global state ──────────────────────────────────────────────────────────
+let allCycling = [], allRunning = [];
+let rollingDays = 28;
+let filterOutliers = true;
+
+// ── Chart instances ────────────────────────────────────────────────────────
+let cyclingChartInst, runningChartInst, trendChartInst;
+
 // ── Init ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
-  // Check if Strava redirected back with ?code=
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   if(code){
@@ -412,6 +544,7 @@ function authoriseStrava(){
 function logout(){
   LS.remove('strava_token');
   document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('controlsBar').style.display = 'none';
   document.getElementById('refreshBtn').style.display = 'none';
   document.getElementById('logoutBtn').style.display = 'none';
   showAuth();
@@ -451,9 +584,6 @@ async function fetchAllActivities(token){
   return all;
 }
 
-// ── Chart instances ────────────────────────────────────────────────────────
-let cyclingChartInst, runningChartInst, trendChartInst;
-
 async function loadData(token){
   token = token || LS.load('strava_token');
   if(!token){ showAuth(); return; }
@@ -461,20 +591,22 @@ async function loadData(token){
   showLoading(true);
   hideError();
   document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('controlsBar').style.display = 'none';
   document.getElementById('refreshBtn').disabled = true;
   setStatus('Loading…');
 
   try {
     const activities = await fetchAllActivities(token);
 
-    const cycling = [], running = [];
+    allCycling = [];
+    allRunning = [];
 
     for(const a of activities){
       const date = new Date(a.start_date);
       const sport = (a.sport_type || a.type || '').toLowerCase();
 
       if(['ride','virtualride','ebikeride'].includes(sport) && a.average_watts && a.average_heartrate){
-        cycling.push({
+        allCycling.push({
           date,
           label: formatDate(date),
           name: a.name,
@@ -486,7 +618,7 @@ async function loadData(token){
 
       if(['run','virtualrun','trailrun'].includes(sport) && a.distance && a.average_heartrate && a.moving_time){
         const totalBeats = a.average_heartrate * (a.moving_time / 60);
-        running.push({
+        allRunning.push({
           date,
           label: formatDate(date),
           name: a.name,
@@ -498,124 +630,13 @@ async function loadData(token){
       }
     }
 
-    cycling.sort((a,b) => a.date - b.date);
-    running.sort((a,b) => a.date - b.date);
-
-    // Stats
-    const avg = arr => arr.reduce((s,x)=>s+x.efficiency,0)/arr.length;
-    const best = arr => Math.max(...arr.map(x=>x.efficiency));
-
-    document.getElementById('avgWatts').textContent  = cycling.length ? avg(cycling).toFixed(3) : '—';
-    document.getElementById('bestWatts').textContent = cycling.length ? best(cycling).toFixed(3) : '—';
-    document.getElementById('avgMeters').textContent  = running.length ? avg(running).toFixed(3) : '—';
-    document.getElementById('bestMeters').textContent = running.length ? best(running).toFixed(3) : '—';
-    document.getElementById('cyclingCount').textContent = `${cycling.length} sessions`;
-    document.getElementById('runningCount').textContent = `${running.length} sessions`;
-
-    // Chart base config
-    const baseOpts = (labelFn) => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#1c1f1d',
-          borderColor: '#2a2e2b',
-          borderWidth: 1,
-          titleColor: '#6b7369',
-          bodyColor: '#e8ede9',
-          titleFont: { family: 'DM Mono', size: 11 },
-          bodyFont:  { family: 'DM Mono', size: 12 },
-          padding: 10,
-          callbacks: { label: labelFn }
-        }
-      },
-      scales: {
-        x: {
-          ticks: { color:'#6b7369', font:{family:'DM Mono',size:10}, maxTicksLimit:8 },
-          grid:  { color:'#1e211f' },
-          border:{ color:'#2a2e2b' }
-        },
-        y: {
-          ticks: { color:'#6b7369', font:{family:'DM Mono',size:10} },
-          grid:  { color:'#1e211f' },
-          border:{ color:'#2a2e2b' }
-        }
-      }
-    });
-
-    if(cyclingChartInst) cyclingChartInst.destroy();
-    cyclingChartInst = new Chart(document.getElementById('cyclingChart'), {
-      type: 'line',
-      data: {
-        labels: cycling.map(x=>x.label),
-        datasets: [{
-          data: cycling.map(x=>x.efficiency),
-          borderColor: '#c8f04a',
-          backgroundColor: 'rgba(200,240,74,0.08)',
-          pointBackgroundColor: '#c8f04a',
-          pointRadius: 4, pointHoverRadius: 6,
-          borderWidth: 1.5, fill: true, tension: 0.3,
-        }]
-      },
-      options: baseOpts((item) => {
-        const d = cycling[item.dataIndex];
-        return [`${item.raw} W/bpm`, `Power: ${d.watts}W`, `HR: ${d.hr} bpm`, d.name];
-      })
-    });
-
-    if(runningChartInst) runningChartInst.destroy();
-    runningChartInst = new Chart(document.getElementById('runningChart'), {
-      type: 'line',
-      data: {
-        labels: running.map(x=>x.label),
-        datasets: [{
-          data: running.map(x=>x.efficiency),
-          borderColor: '#4af0c8',
-          backgroundColor: 'rgba(74,240,200,0.08)',
-          pointBackgroundColor: '#4af0c8',
-          pointRadius: 4, pointHoverRadius: 6,
-          borderWidth: 1.5, fill: true, tension: 0.3,
-        }]
-      },
-      options: baseOpts((item) => {
-        const d = running[item.dataIndex];
-        return [`${item.raw} m/bpm`, `${(d.distance/1000).toFixed(2)} km`, `HR: ${d.hr} bpm`, d.name];
-      })
-    });
-
-    // Rolling 4-week trend
-    const trend = buildTrend(cycling, running);
-    if(trendChartInst) trendChartInst.destroy();
-    trendChartInst = new Chart(document.getElementById('trendChart'), {
-      type: 'line',
-      data: {
-        labels: trend.labels,
-        datasets: [
-          { label:'Cycling', data:trend.cycling, borderColor:'#c8f04a', pointRadius:2, borderWidth:1.5, tension:0.4, fill:false },
-          { label:'Running', data:trend.running, borderColor:'#4af0c8', pointRadius:2, borderWidth:1.5, tension:0.4, fill:false }
-        ]
-      },
-      options: {
-        ...baseOpts(item => `${item.raw}%`),
-        plugins: {
-          ...baseOpts().plugins,
-          legend: {
-            display: true,
-            labels: { color:'#6b7369', font:{family:'DM Mono',size:11}, boxWidth:20 }
-          },
-          tooltip: {
-            backgroundColor:'#1c1f1d', borderColor:'#2a2e2b', borderWidth:1,
-            titleColor:'#6b7369', bodyColor:'#e8ede9',
-            titleFont:{family:'DM Mono',size:11}, bodyFont:{family:'DM Mono',size:12}, padding:10
-          }
-        }
-      }
-    });
+    allCycling.sort((a,b) => a.date - b.date);
+    allRunning.sort((a,b) => a.date - b.date);
 
     setStatus(`Updated ${new Date().toLocaleTimeString()} · ${activities.length} activities`);
+    document.getElementById('controlsBar').style.display = 'flex';
     document.getElementById('dashboard').style.display = 'block';
+    renderDashboard();
 
   } catch(err){
     showError(err.message);
@@ -629,8 +650,309 @@ async function loadData(token){
   }
 }
 
-function buildTrend(cycling, running){
-  const allDates = [...cycling,...running].map(x=>x.date);
+// ── Outlier detection (IQR method) ────────────────────────────────────────
+// Flags values outside Q1 - 1.5*IQR … Q3 + 1.5*IQR as outliers.
+// Requires at least 4 data points; otherwise returns everything as clean.
+function detectOutliers(arr){
+  if(arr.length < 4) return { clean: arr, outliers: [] };
+  const sorted = arr.map(x => x.efficiency).sort((a,b) => a-b);
+  const q1 = sorted[Math.floor(sorted.length * 0.25)];
+  const q3 = sorted[Math.floor(sorted.length * 0.75)];
+  const iqr = q3 - q1;
+  const lo = q1 - 1.5 * iqr;
+  const hi = q3 + 1.5 * iqr;
+  return {
+    clean:    arr.filter(x => x.efficiency >= lo && x.efficiency <= hi),
+    outliers: arr.filter(x => x.efficiency <  lo || x.efficiency >  hi),
+  };
+}
+
+// ── Rolling average ────────────────────────────────────────────────────────
+// For each data point, averages all points within the preceding `days` window.
+function computeRollingAvg(arr, days){
+  return arr.map(item => {
+    const cutoff = new Date(item.date.getTime() - days * 86400000);
+    const w = arr.filter(x => x.date >= cutoff && x.date <= item.date);
+    return w.length ? +(w.reduce((s,x) => s + x.efficiency, 0) / w.length).toFixed(3) : null;
+  });
+}
+
+// ── Filter controls ────────────────────────────────────────────────────────
+function setPreset(preset){
+  const now = new Date();
+  const sd = document.getElementById('startDate');
+  const ed = document.getElementById('endDate');
+  const toStr = d => d.toISOString().split('T')[0];
+
+  switch(preset){
+    case 'all':  sd.value = '';                          ed.value = '';               break;
+    case 'ytd':  sd.value = `${now.getFullYear()}-01-01`; ed.value = '';              break;
+    case '2025': sd.value = '2025-01-01';                ed.value = '2025-12-31';     break;
+    case '2024': sd.value = '2024-01-01';                ed.value = '2024-12-31';     break;
+    case '6m':  { const s=new Date(now); s.setMonth(s.getMonth()-6);  sd.value=toStr(s); ed.value=''; break; }
+    case '12m': { const s=new Date(now); s.setMonth(s.getMonth()-12); sd.value=toStr(s); ed.value=''; break; }
+  }
+
+  document.querySelectorAll('[data-preset]').forEach(b =>
+    b.classList.toggle('active', b.dataset.preset === preset)
+  );
+  renderDashboard();
+}
+
+function clearPresetBtns(){
+  document.querySelectorAll('[data-preset]').forEach(b => b.classList.remove('active'));
+}
+
+function setRolling(days){
+  rollingDays = days;
+  document.querySelectorAll('[data-days]').forEach(b =>
+    b.classList.toggle('active', +b.dataset.days === days)
+  );
+  renderDashboard();
+}
+
+function toggleOutliers(){
+  filterOutliers = !filterOutliers;
+  const btn = document.getElementById('outlierBtn');
+  btn.textContent = filterOutliers ? 'Filter on' : 'Filter off';
+  btn.classList.toggle('active', filterOutliers);
+  renderDashboard();
+}
+
+// ── Apply filters and render ──────────────────────────────────────────────
+function renderDashboard(){
+  const startVal = document.getElementById('startDate').value;
+  const endVal   = document.getElementById('endDate').value;
+  const startDate = startVal ? new Date(startVal)              : null;
+  const endDate   = endVal   ? new Date(endVal + 'T23:59:59')  : null;
+
+  let cycling = allCycling.filter(x =>
+    (!startDate || x.date >= startDate) && (!endDate || x.date <= endDate)
+  );
+  let running = allRunning.filter(x =>
+    (!startDate || x.date >= startDate) && (!endDate || x.date <= endDate)
+  );
+
+  let removedCount = 0;
+  if(filterOutliers){
+    const cRes = detectOutliers(cycling);
+    const rRes = detectOutliers(running);
+    removedCount = cRes.outliers.length + rRes.outliers.length;
+    cycling = cRes.clean;
+    running = rRes.clean;
+  }
+
+  const info = document.getElementById('outlierInfo');
+  if(filterOutliers){
+    info.textContent = removedCount > 0 ? `${removedCount} removed` : 'none detected';
+  } else {
+    info.textContent = '';
+  }
+
+  renderCharts(cycling, running);
+}
+
+// ── Render charts ─────────────────────────────────────────────────────────
+function renderCharts(cycling, running){
+  const avg  = arr => arr.length ? arr.reduce((s,x) => s + x.efficiency, 0) / arr.length : 0;
+  const best = arr => arr.length ? Math.max(...arr.map(x => x.efficiency)) : 0;
+
+  document.getElementById('avgWatts').textContent  = cycling.length ? avg(cycling).toFixed(3)  : '—';
+  document.getElementById('bestWatts').textContent = cycling.length ? best(cycling).toFixed(3) : '—';
+  document.getElementById('avgMeters').textContent  = running.length ? avg(running).toFixed(3)  : '—';
+  document.getElementById('bestMeters').textContent = running.length ? best(running).toFixed(3) : '—';
+  document.getElementById('cyclingCount').textContent = `${cycling.length} sessions`;
+  document.getElementById('runningCount').textContent = `${running.length} sessions`;
+
+  const wLabel = rollingDays / 7;
+  document.getElementById('trendTitle').innerHTML =
+    `Rolling ${wLabel}W Trend <span class="unit">% change from baseline</span>`;
+
+  const cRolling = computeRollingAvg(cycling, rollingDays);
+  const rRolling = computeRollingAvg(running, rollingDays);
+
+  // Shared scale config
+  const scales = {
+    x: {
+      ticks: { color:'#6b7369', font:{family:'DM Mono',size:10}, maxTicksLimit:8 },
+      grid:  { color:'#1e211f' },
+      border:{ color:'#2a2e2b' }
+    },
+    y: {
+      ticks: { color:'#6b7369', font:{family:'DM Mono',size:10} },
+      grid:  { color:'#1e211f' },
+      border:{ color:'#2a2e2b' }
+    }
+  };
+
+  const tooltipBase = {
+    backgroundColor: '#1c1f1d',
+    borderColor: '#2a2e2b',
+    borderWidth: 1,
+    titleColor: '#6b7369',
+    bodyColor: '#e8ede9',
+    titleFont: { family:'DM Mono', size:11 },
+    bodyFont:  { family:'DM Mono', size:12 },
+    padding: 10,
+  };
+
+  // ── Cycling chart ────────────────────────────────────────────────────────
+  if(cyclingChartInst) cyclingChartInst.destroy();
+  cyclingChartInst = new Chart(document.getElementById('cyclingChart'), {
+    type: 'line',
+    data: {
+      labels: cycling.map(x => x.label),
+      datasets: [
+        {
+          label: 'Session',
+          data: cycling.map(x => x.efficiency),
+          borderColor: '#c8f04a',
+          backgroundColor: 'rgba(200,240,74,0.08)',
+          pointBackgroundColor: '#c8f04a',
+          pointRadius: 4, pointHoverRadius: 6,
+          borderWidth: 1.5, fill: true, tension: 0.3,
+        },
+        {
+          label: `${wLabel}W avg`,
+          data: cRolling,
+          borderColor: 'rgba(200,240,74,0.5)',
+          borderDash: [5,4],
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false,
+          tension: 0.4,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { display:false },
+        tooltip: {
+          ...tooltipBase,
+          callbacks: {
+            label: (item) => {
+              if(item.datasetIndex === 0){
+                const d = cycling[item.dataIndex];
+                return [`${item.raw} W/bpm`, `Power: ${d.watts}W`, `HR: ${d.hr} bpm`, d.name];
+              }
+              return item.raw !== null ? [`${item.raw} W/bpm (${wLabel}w avg)`] : [];
+            }
+          }
+        }
+      },
+      scales,
+    }
+  });
+
+  // ── Running chart ────────────────────────────────────────────────────────
+  if(runningChartInst) runningChartInst.destroy();
+  runningChartInst = new Chart(document.getElementById('runningChart'), {
+    type: 'line',
+    data: {
+      labels: running.map(x => x.label),
+      datasets: [
+        {
+          label: 'Session',
+          data: running.map(x => x.efficiency),
+          borderColor: '#4af0c8',
+          backgroundColor: 'rgba(74,240,200,0.08)',
+          pointBackgroundColor: '#4af0c8',
+          pointRadius: 4, pointHoverRadius: 6,
+          borderWidth: 1.5, fill: true, tension: 0.3,
+        },
+        {
+          label: `${wLabel}W avg`,
+          data: rRolling,
+          borderColor: 'rgba(74,240,200,0.5)',
+          borderDash: [5,4],
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false,
+          tension: 0.4,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { display:false },
+        tooltip: {
+          ...tooltipBase,
+          callbacks: {
+            label: (item) => {
+              if(item.datasetIndex === 0){
+                const d = running[item.dataIndex];
+                return [`${item.raw} m/bpm`, `${(d.distance/1000).toFixed(2)} km`, `HR: ${d.hr} bpm`, d.name];
+              }
+              return item.raw !== null ? [`${item.raw} m/bpm (${wLabel}w avg)`] : [];
+            }
+          }
+        }
+      },
+      scales,
+    }
+  });
+
+  // ── Trend chart ──────────────────────────────────────────────────────────
+  const trend = buildTrend(cycling, running, rollingDays);
+  if(trendChartInst) trendChartInst.destroy();
+  trendChartInst = new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {
+      labels: trend.labels,
+      datasets: [
+        { label:'Cycling', data:trend.cycling, borderColor:'#c8f04a', pointRadius:2, borderWidth:1.5, tension:0.4, fill:false },
+        { label:'Running', data:trend.running, borderColor:'#4af0c8', pointRadius:2, borderWidth:1.5, tension:0.4, fill:false }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color:'#6b7369', font:{family:'DM Mono',size:11}, boxWidth:20 }
+        },
+        tooltip: {
+          ...tooltipBase,
+          callbacks: {
+            label: item => {
+              if(item.raw === null) return 'no data';
+              const sign = item.raw > 0 ? '+' : '';
+              return `${item.dataset.label}: ${sign}${item.raw}%`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color:'#6b7369', font:{family:'DM Mono',size:10}, maxTicksLimit:8 },
+          grid:  { color:'#1e211f' },
+          border:{ color:'#2a2e2b' }
+        },
+        y: {
+          ticks: {
+            color:'#6b7369', font:{family:'DM Mono',size:10},
+            callback: v => `${v > 0 ? '+' : ''}${v}%`
+          },
+          grid:  { color:'#1e211f' },
+          border:{ color:'#2a2e2b' }
+        }
+      }
+    }
+  });
+}
+
+// ── Build trend data ──────────────────────────────────────────────────────
+function buildTrend(cycling, running, days){
+  days = days || 28;
+  const allDates = [...cycling,...running].map(x => x.date);
   if(!allDates.length) return {labels:[],cycling:[],running:[]};
 
   const minDate = new Date(Math.min(...allDates));
@@ -640,22 +962,21 @@ function buildTrend(cycling, running){
   while(d <= maxDate){ weeks.push(new Date(d)); d.setDate(d.getDate()+7); }
 
   const rolling = (arr, weekEnd) => {
-    const start = new Date(weekEnd);
-    start.setDate(start.getDate()-28);
-    const w = arr.filter(x => x.date>=start && x.date<=weekEnd);
-    return w.length ? w.reduce((s,x)=>s+x.efficiency,0)/w.length : null;
+    const start = new Date(weekEnd.getTime() - days * 86400000);
+    const w = arr.filter(x => x.date >= start && x.date <= weekEnd);
+    return w.length ? w.reduce((s,x) => s + x.efficiency, 0) / w.length : null;
   };
 
   const normalise = vals => {
-    const first = vals.find(v=>v!==null);
+    const first = vals.find(v => v !== null);
     if(!first) return vals;
-    return vals.map(v => v===null ? null : +((v/first-1)*100).toFixed(2));
+    return vals.map(v => v === null ? null : +((v/first-1)*100).toFixed(2));
   };
 
   return {
-    labels: weeks.map(w=>formatDate(w)),
-    cycling: normalise(weeks.map(w=>rolling(cycling,w))),
-    running: normalise(weeks.map(w=>rolling(running,w))),
+    labels:  weeks.map(w => formatDate(w)),
+    cycling: normalise(weeks.map(w => rolling(cycling, w))),
+    running: normalise(weeks.map(w => rolling(running, w))),
   };
 }
 
