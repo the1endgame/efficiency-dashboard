@@ -426,22 +426,22 @@
   <div id="dashboard" style="display:none">
     <div class="stats-row">
       <div class="stat-card cycling">
-        <div class="stat-label"><span class="dot cycling"></span>Avg W/bpm — Cycling</div>
+        <div class="stat-label"><span class="dot cycling"></span>Avg W/beat — Cycling</div>
         <div class="stat-value cycling" id="avgWatts">—</div>
         <div class="stat-sub">watts per heartbeat</div>
       </div>
       <div class="stat-card cycling">
-        <div class="stat-label"><span class="dot cycling"></span>Best W/bpm — Cycling</div>
+        <div class="stat-label"><span class="dot cycling"></span>Best W/beat — Cycling</div>
         <div class="stat-value cycling" id="bestWatts">—</div>
         <div class="stat-sub">peak efficiency session</div>
       </div>
       <div class="stat-card running">
-        <div class="stat-label"><span class="dot running"></span>Avg m/bpm — Running</div>
+        <div class="stat-label"><span class="dot running"></span>Avg m/beat — Running</div>
         <div class="stat-value running" id="avgMeters">—</div>
         <div class="stat-sub">meters per heartbeat</div>
       </div>
       <div class="stat-card running">
-        <div class="stat-label"><span class="dot running"></span>Best m/bpm — Running</div>
+        <div class="stat-label"><span class="dot running"></span>Best m/beat — Running</div>
         <div class="stat-value running" id="bestMeters">—</div>
         <div class="stat-sub">peak efficiency session</div>
       </div>
@@ -450,14 +450,14 @@
     <div class="charts-grid">
       <div class="chart-card">
         <div class="chart-header">
-          <div class="chart-title">Cycling Efficiency <span class="unit">W / bpm</span></div>
+          <div class="chart-title">Cycling Efficiency <span class="unit">W / beat</span></div>
           <span class="chart-count" id="cyclingCount">0 sessions</span>
         </div>
         <div class="chart-container"><canvas id="cyclingChart"></canvas></div>
       </div>
       <div class="chart-card">
         <div class="chart-header">
-          <div class="chart-title">Running Efficiency <span class="unit">m / bpm</span></div>
+          <div class="chart-title">Running Efficiency <span class="unit">m / beat</span></div>
           <span class="chart-count" id="runningCount">0 sessions</span>
         </div>
         <div class="chart-container"><canvas id="runningChart"></canvas></div>
@@ -836,9 +836,9 @@ function renderCharts(cycling, running){
             label: (item) => {
               if(item.datasetIndex === 0){
                 const d = cycling[item.dataIndex];
-                return [`${item.raw} W/bpm`, `Power: ${d.watts}W`, `HR: ${d.hr} bpm`, d.name];
+                return [`${item.raw} W/beat`, `Power: ${d.watts}W`, `HR: ${d.hr} bpm`, d.name];
               }
-              return item.raw !== null ? [`${item.raw} W/bpm (${wLabel}w avg)`] : [];
+              return item.raw !== null ? [`${item.raw} W/beat (${wLabel}w avg)`] : [];
             }
           }
         }
@@ -887,9 +887,9 @@ function renderCharts(cycling, running){
             label: (item) => {
               if(item.datasetIndex === 0){
                 const d = running[item.dataIndex];
-                return [`${item.raw} m/bpm`, `${(d.distance/1000).toFixed(2)} km`, `HR: ${d.hr} bpm`, d.name];
+                return [`${item.raw} m/beat`, `${(d.distance/1000).toFixed(2)} km`, `HR: ${d.hr} bpm`, d.name];
               }
-              return item.raw !== null ? [`${item.raw} m/bpm (${wLabel}w avg)`] : [];
+              return item.raw !== null ? [`${item.raw} m/beat (${wLabel}w avg)`] : [];
             }
           }
         }
