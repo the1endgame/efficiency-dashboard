@@ -186,11 +186,10 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     padding: 0.75rem 1.4rem;
-    cursor: pointer;
+    cursor: not-allowed;
+    opacity: 0.5;
     transition: opacity 0.15s;
   }
-
-  .runkeeper-btn:hover { opacity: 0.85; border: none; color: #fff; }
 
   .trainingpeaks-btn {
     display: inline-flex;
@@ -204,11 +203,10 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     padding: 0.75rem 1.4rem;
-    cursor: pointer;
+    cursor: not-allowed;
+    opacity: 0.5;
     transition: opacity 0.15s;
   }
-
-  .trainingpeaks-btn:hover { opacity: 0.85; border: none; color: #fff; }
 
   /* Stats */
   .stats-row {
@@ -466,9 +464,10 @@
 
       <!-- Runkeeper -->
       <div class="source-card">
+        <span class="source-badge coming-soon">Coming soon</span>
         <div class="source-card-name">Runkeeper</div>
         <div class="source-card-desc">Running, cycling and fitness activities from the Runkeeper app.</div>
-        <button class="runkeeper-btn" onclick="authoriseRunkeeper()">
+        <button class="runkeeper-btn" disabled title="Runkeeper integration coming soon">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9l1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/></svg>
           Connect
         </button>
@@ -476,9 +475,10 @@
 
       <!-- TrainingPeaks -->
       <div class="source-card">
+        <span class="source-badge coming-soon">Coming soon</span>
         <div class="source-card-name">TrainingPeaks</div>
         <div class="source-card-desc">Structured workouts and performance analytics from TrainingPeaks.</div>
-        <button class="trainingpeaks-btn" onclick="authoriseTrainingPeaks()">
+        <button class="trainingpeaks-btn" disabled title="TrainingPeaks integration coming soon">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M3.5 18.5l6-6 4 4L22 6.92 20.59 5.5l-7.09 8-4-4L2 17l1.5 1.5z"/></svg>
           Connect
         </button>
@@ -586,17 +586,8 @@
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────
-const STRAVA_CLIENT_ID     = '203930';
-const STRAVA_CLIENT_SECRET = '8d25e65d23c2bd0ebf7d0b3cd9dac4b7b7b69ada';
-
-// Register at https://runkeeper.com/partner/request
-const RK_CLIENT_ID     = 'YOUR_RUNKEEPER_CLIENT_ID';
-const RK_CLIENT_SECRET = 'YOUR_RUNKEEPER_CLIENT_SECRET';
-
-// Register at https://api.trainingpeaks.com/request-access
-const TP_CLIENT_ID     = 'YOUR_TRAININGPEAKS_CLIENT_ID';
-const TP_CLIENT_SECRET = 'YOUR_TRAININGPEAKS_CLIENT_SECRET';
-
+const CLIENT_ID = '203930';
+const CLIENT_SECRET = '8d25e65d23c2bd0ebf7d0b3cd9dac4b7b7b69ada';
 const REDIRECT_URI = 'https://the1endgame.github.io/efficiency-dashboard';
 
 // ── Storage ───────────────────────────────────────────────────────────────
@@ -610,7 +601,6 @@ const LS = {
 let allCycling = [], allRunning = [];
 let rollingDays = 28;
 let filterOutliers = true;
-let activeSource = null; // 'strava' | 'runkeeper' | 'trainingpeaks'
 
 // ── Chart instances ────────────────────────────────────────────────────────
 let cyclingChartInst, runningChartInst, trendChartInst;
@@ -621,15 +611,25 @@ window.addEventListener('DOMContentLoaded', async () => {
   const code = params.get('code');
   if(code){
     history.replaceState(null, '', window.location.pathname);
-    const source = LS.load('pending_source') || 'strava';
-    LS.remove('pending_source');
     showLoading(true);
     setLoadingText('Exchanging auth code…');
     try {
-      const token = await exchangeCode(source, code);
-      activeSource = source;
+      const r = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          code,
+          grant_type: 'authorization_code'
+        })
+      });
+      const data = await r.json();
+      if(!data.access_token) throw new Error(data.message || 'Token exchange failed');
+      LS.save('strava_token', data.access_token);
+      LS.save('strava_refresh', data.refresh_token);
       showLoading(false);
-      startDashboard(token);
+      startDashboard(data.access_token);
     } catch(e){
       showLoading(false);
       showError('Auth failed: ' + e.message);
@@ -638,94 +638,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  const stravaToken = LS.load('strava_token');
-  const rkToken     = LS.load('rk_token');
-  const tpToken     = LS.load('tp_token');
-  if(stravaToken)     { activeSource = 'strava';        startDashboard(stravaToken); }
-  else if(rkToken)    { activeSource = 'runkeeper';     startDashboard(rkToken); }
-  else if(tpToken)    { activeSource = 'trainingpeaks'; startDashboard(tpToken); }
-  else                { showAuth(); }
+  const saved = LS.load('strava_token');
+  if(saved){
+    startDashboard(saved);
+  } else {
+    showAuth();
+  }
 });
 
-// ── Token exchange ─────────────────────────────────────────────────────────
-async function exchangeCode(source, code){
-  if(source === 'strava'){
-    const r = await fetch('https://www.strava.com/oauth/token', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        client_id: STRAVA_CLIENT_ID,
-        client_secret: STRAVA_CLIENT_SECRET,
-        code,
-        grant_type: 'authorization_code'
-      })
-    });
-    const data = await r.json();
-    if(!data.access_token) throw new Error(data.message || 'Token exchange failed');
-    LS.save('strava_token', data.access_token);
-    LS.save('strava_refresh', data.refresh_token);
-    return data.access_token;
-  }
-
-  if(source === 'runkeeper'){
-    const r = await fetch('https://runkeeper.com/apps/token', {
-      method: 'POST',
-      headers: {'Content-Type':'application/x-www-form-urlencoded'},
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: RK_CLIENT_ID,
-        client_secret: RK_CLIENT_SECRET,
-        redirect_uri: REDIRECT_URI,
-      })
-    });
-    const data = await r.json();
-    if(!data.access_token) throw new Error(data.message || 'Runkeeper token exchange failed');
-    LS.save('rk_token', data.access_token);
-    return data.access_token;
-  }
-
-  if(source === 'trainingpeaks'){
-    const r = await fetch('https://api.trainingpeaks.com/oauth/token', {
-      method: 'POST',
-      headers: {'Content-Type':'application/x-www-form-urlencoded'},
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: TP_CLIENT_ID,
-        client_secret: TP_CLIENT_SECRET,
-        redirect_uri: REDIRECT_URI,
-      })
-    });
-    const data = await r.json();
-    if(!data.access_token) throw new Error(data.error_description || 'TrainingPeaks token exchange failed');
-    LS.save('tp_token', data.access_token);
-    return data.access_token;
-  }
-
-  throw new Error(`Unknown source: ${source}`);
-}
-
-// ── Authorise ──────────────────────────────────────────────────────────────
 function authoriseStrava(){
-  LS.save('pending_source', 'strava');
-  window.location.href = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&approval_prompt=auto&scope=activity:read_all`;
-}
-
-function authoriseRunkeeper(){
-  LS.save('pending_source', 'runkeeper');
-  window.location.href = `https://runkeeper.com/apps/authorize?client_id=${RK_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code`;
-}
-
-function authoriseTrainingPeaks(){
-  LS.save('pending_source', 'trainingpeaks');
-  window.location.href = `https://api.trainingpeaks.com/oauth/authorize?client_id=${TP_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=workouts%3Aread`;
+  const url = `https://www.strava.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&approval_prompt=auto&scope=activity:read_all`;
+  window.location.href = url;
 }
 
 function logout(){
-  const tokenKey = { strava:'strava_token', runkeeper:'rk_token', trainingpeaks:'tp_token' }[activeSource];
-  if(tokenKey) LS.remove(tokenKey);
-  activeSource = null;
+  LS.remove('strava_token');
   document.getElementById('dashboard').style.display = 'none';
   document.getElementById('controlsBar').style.display = 'none';
   document.getElementById('refreshBtn').style.display = 'none';
@@ -745,15 +672,18 @@ function startDashboard(token){
   loadData(token);
 }
 
-// ── Fetch: Strava ──────────────────────────────────────────────────────────
-async function fetchStravaActivities(token){
+// ── Fetch activities ───────────────────────────────────────────────────────
+async function fetchAllActivities(token){
   let page = 1, all = [];
   while(true){
-    setLoadingText(`Fetching Strava activities… (${all.length} so far)`);
+    setLoadingText(`Fetching activities… (${all.length} so far)`);
     const r = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=200&page=${page}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if(r.status === 401){ LS.remove('strava_token'); throw new Error('Session expired — please reconnect to Strava.'); }
+    if(r.status === 401){
+      LS.remove('strava_token');
+      throw new Error('Session expired — please reconnect to Strava.');
+    }
     if(!r.ok) throw new Error(`Strava API error ${r.status}`);
     const data = await r.json();
     if(!data.length) break;
@@ -764,54 +694,8 @@ async function fetchStravaActivities(token){
   return all;
 }
 
-// ── Fetch: Runkeeper ───────────────────────────────────────────────────────
-async function fetchRunkeeperActivities(token){
-  let all = [], nextUrl = 'https://api.runkeeper.com/fitnessActivities?pageSize=100';
-  while(nextUrl){
-    setLoadingText(`Fetching Runkeeper activities… (${all.length} so far)`);
-    const r = await fetch(nextUrl, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.com.runkeeper.FitnessActivityFeed+json',
-      }
-    });
-    if(r.status === 401){ LS.remove('rk_token'); throw new Error('Session expired — please reconnect to Runkeeper.'); }
-    if(!r.ok) throw new Error(`Runkeeper API error ${r.status}`);
-    const data = await r.json();
-    all = all.concat(data.items || []);
-    nextUrl = data.next ? `https://api.runkeeper.com${data.next}` : null;
-  }
-  return all;
-}
-
-// ── Fetch: TrainingPeaks ───────────────────────────────────────────────────
-async function fetchTrainingPeaksWorkouts(token){
-  setLoadingText('Fetching TrainingPeaks profile…');
-  const profileR = await fetch('https://api.trainingpeaks.com/v1/athlete/profile', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if(profileR.status === 401){ LS.remove('tp_token'); throw new Error('Session expired — please reconnect to TrainingPeaks.'); }
-  if(!profileR.ok) throw new Error(`TrainingPeaks API error ${profileR.status}`);
-  const profile = await profileR.json();
-  const userId = profile.Id || profile.id;
-
-  const endDate   = new Date().toISOString().split('T')[0];
-  const startDate = new Date(Date.now() - 10 * 365.25 * 86400000).toISOString().split('T')[0];
-  setLoadingText('Fetching TrainingPeaks workouts…');
-  const r = await fetch(
-    `https://api.trainingpeaks.com/v1/workouts/${userId}?startDate=${startDate}&endDate=${endDate}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if(!r.ok) throw new Error(`TrainingPeaks workouts error ${r.status}`);
-  return await r.json();
-}
-
-// ── Load & process data ────────────────────────────────────────────────────
 async function loadData(token){
-  if(!token){
-    const tokenKey = { strava:'strava_token', runkeeper:'rk_token', trainingpeaks:'tp_token' }[activeSource];
-    token = tokenKey ? LS.load(tokenKey) : null;
-  }
+  token = token || LS.load('strava_token');
   if(!token){ showAuth(); return; }
 
   showLoading(true);
@@ -822,77 +706,44 @@ async function loadData(token){
   setStatus('Loading…');
 
   try {
+    const activities = await fetchAllActivities(token);
+
     allCycling = [];
     allRunning = [];
-    let totalCount = 0;
 
-    if(activeSource === 'strava'){
-      const activities = await fetchStravaActivities(token);
-      totalCount = activities.length;
-      for(const a of activities){
-        const date  = new Date(a.start_date);
-        const sport = (a.sport_type || a.type || '').toLowerCase();
-        if(['ride','virtualride','ebikeride'].includes(sport) && a.average_watts && a.average_heartrate){
-          allCycling.push({ date, label:formatDate(date), name:a.name,
-            efficiency: +(a.average_watts / a.average_heartrate).toFixed(3),
-            watts: a.average_watts, hr: a.average_heartrate });
-        }
-        if(['run','virtualrun','trailrun'].includes(sport) && a.distance && a.average_heartrate && a.moving_time){
-          const totalBeats = a.average_heartrate * (a.moving_time / 60);
-          allRunning.push({ date, label:formatDate(date), name:a.name,
-            efficiency: +(a.distance / totalBeats).toFixed(3),
-            distance: a.distance, hr: a.average_heartrate, duration: a.moving_time });
-        }
+    for(const a of activities){
+      const date = new Date(a.start_date);
+      const sport = (a.sport_type || a.type || '').toLowerCase();
+
+      if(['ride','virtualride','ebikeride'].includes(sport) && a.average_watts && a.average_heartrate){
+        allCycling.push({
+          date,
+          label: formatDate(date),
+          name: a.name,
+          efficiency: +(a.average_watts / a.average_heartrate).toFixed(3),
+          watts: a.average_watts,
+          hr: a.average_heartrate,
+        });
       }
 
-    } else if(activeSource === 'runkeeper'){
-      const activities = await fetchRunkeeperActivities(token);
-      totalCount = activities.length;
-      for(const a of activities){
-        const type = (a.type || '').toLowerCase();
-        const hr   = a.average_heart_rate;
-        if(!hr) continue;
-        const date = new Date(a.start_time);
-        // Runkeeper has no power data, so only running efficiency (m/bpm) is available
-        if(['running','trail running'].includes(type) && a.total_distance && a.duration){
-          const totalBeats = hr * (a.duration / 60);
-          allRunning.push({ date, label:formatDate(date), name:a.type,
-            efficiency: +(a.total_distance / totalBeats).toFixed(3),
-            distance: a.total_distance, hr, duration: a.duration });
-        }
-      }
-
-    } else if(activeSource === 'trainingpeaks'){
-      const workouts = await fetchTrainingPeaksWorkouts(token);
-      totalCount = workouts.length;
-      for(const w of workouts){
-        const type  = (w.WorkoutType || w.workoutType || '').toLowerCase();
-        const hr    = w.AverageHeartRateInBeatsPerMinute || w.averageHeartRateInBeatsPerMinute;
-        const watts = w.NormalizedPowerInWatts || w.normalizedPowerInWatts ||
-                      w.AveragePowerInWatts   || w.averagePowerInWatts;
-        const dist  = w.TotalDistanceInMeters || w.totalDistanceInMeters;
-        const dur   = w.TotalDuration || w.totalDuration; // seconds
-        const name  = w.Title || w.title || type;
-        if(!hr) continue;
-        const date = new Date(w.StartTime || w.startTime);
-        if(['bike','cycling'].includes(type) && watts){
-          allCycling.push({ date, label:formatDate(date), name,
-            efficiency: +(watts / hr).toFixed(3), watts, hr });
-        }
-        if(['run','running'].includes(type) && dist && dur){
-          const totalBeats = hr * (dur / 60);
-          allRunning.push({ date, label:formatDate(date), name,
-            efficiency: +(dist / totalBeats).toFixed(3),
-            distance: dist, hr, duration: dur });
-        }
+      if(['run','virtualrun','trailrun'].includes(sport) && a.distance && a.average_heartrate && a.moving_time){
+        const totalBeats = a.average_heartrate * (a.moving_time / 60);
+        allRunning.push({
+          date,
+          label: formatDate(date),
+          name: a.name,
+          efficiency: +(a.distance / totalBeats).toFixed(3),
+          distance: a.distance,
+          hr: a.average_heartrate,
+          duration: a.moving_time,
+        });
       }
     }
 
     allCycling.sort((a,b) => a.date - b.date);
     allRunning.sort((a,b) => a.date - b.date);
 
-    const srcLabel = { strava:'Strava', runkeeper:'Runkeeper', trainingpeaks:'TrainingPeaks' }[activeSource];
-    setStatus(`Updated ${new Date().toLocaleTimeString()} · ${totalCount} activities · ${srcLabel}`);
+    setStatus(`Updated ${new Date().toLocaleTimeString()} · ${activities.length} activities`);
     document.getElementById('controlsBar').style.display = 'flex';
     document.getElementById('dashboard').style.display = 'block';
     renderDashboard();
